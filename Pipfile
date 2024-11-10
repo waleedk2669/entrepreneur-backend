@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+flask-migrate = "*"
+flask-sqlalchemy = "*"
+sqlalchemy-serializer = "*"
+flask = "*"
+flask-bcrypt = "*"
+flask-session = "*"
+pytz = "*"
+flask-limiter = "*"
+flask-cors = "*"
+flask-caching = "*"
+pyjwt = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.8"
