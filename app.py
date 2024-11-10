@@ -16,7 +16,7 @@ from functools import wraps
 
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}}, supports_credentials=True)
+CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}}, supports_credentials=True)    
 
 app.secret_key = "supersecretkey"  # No longer needed
 
@@ -55,32 +55,7 @@ def verify_token(token):
         return None  # Token has expired
     except jwt.InvalidTokenError:
         return None  # Invalid token
-@app.before_request
-def before_request():
-    token = request.headers.get('Authorization', '').split(" ")[1] if 'Authorization' in request.headers else None
-    if token:
-        try:
-            # Decode the token
-            payload = verify_token(token)
-            if payload:
-                # Attach user data to the request object
-                request.user_id = payload['user_id']
-                request.username = payload.get('username')
-                request.user_type = payload.get('user_type')
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'error': 'Invalid token'}), 401
-    else:
-        return jsonify({'error': 'Token is missing'}), 401
-    
 
-@app.after_request
-def after_request(response):
-    response.headers['Access-Control-Allow-Origin'] = 'http://localhost:5173'  # Frontend URL
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
-    response.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type'
-    return response
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
