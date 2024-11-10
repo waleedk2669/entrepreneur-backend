@@ -73,6 +73,23 @@ def token_required(f):
         request.user_type = payload.get('user_type')
         return f(*args, **kwargs)
     return decorated
+@app.before_request
+def before_request():
+    token = request.headers.get('Authorization', '').split(" ")[1] if 'Authorization' in request.headers else None
+    if token:
+        try:
+            payload = verify_token(token)
+            if payload:
+                # Attach user data to the request object
+                request.user_id = payload['user_id']
+                request.username = payload.get('username')
+                request.user_type = payload.get('user_type')
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+    else:
+        return jsonify({'error': 'Token is missing'}), 401
 
 
 # ---------------------BOOKING-------------------------------------------------------------------#
