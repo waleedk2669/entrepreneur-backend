@@ -16,15 +16,14 @@ from functools import wraps
 
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}}, supports_credentials=True)    
+# CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}}, supports_credentials=True)
+CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_headers=["Content-Type", "Authorization"],)
 
-app.secret_key = "supersecretkey"  # No longer needed
-
+app.secret_key = "supersecretkey" 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///jwhit.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["REMEMBER_COOKIE_SECURE"] = False
 app.config["BCRYPT_LOG_ROUNDS"] = 12  # Set work factor to 12 if not already configured
-
 app.config["SESSION_COOKIE_HTTPONLY"] = True  # Prevents client-side scripts from accessing cookies
 app.config["SESSION_COOKIE_SAMESITE"] = "None"  # Allows cookies in cross-origin requests
 
@@ -75,6 +74,10 @@ def token_required(f):
     return decorated
 @app.before_request
 def before_request():
+    # Skip token verification for preflight (OPTIONS) requests
+    if request.method == 'OPTIONS':
+        return '', 204
+
     token = request.headers.get('Authorization', '').split(" ")[1] if 'Authorization' in request.headers else None
     if token:
         try:
@@ -91,6 +94,13 @@ def before_request():
     else:
         return jsonify({'error': 'Token is missing'}), 401
 
+@app.after_request
+def after_request(response):
+    # response.headers.add('Access-Control-Allow-Origin', 'http://localhost:5173')
+    # response.headers.add('Access-Control-Allow-Credentials', 'true')
+    # response.headers.add('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+    # response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    return response
 
 # ---------------------BOOKING-------------------------------------------------------------------#
 class Booking(db.Model, SerializerMixin):
@@ -118,7 +128,7 @@ class Booking(db.Model, SerializerMixin):
     user = db.relationship("User", back_populates="bookings")
 
     def to_dict(self):
-        local_timezone = pytz.timezone("America/New_York")  # Use your timezone here
+        local_timezone = pytz.timezone("America/New_York")  
         booking_date_local = self.booking_date.astimezone(local_timezone) if self.booking_date else None
         event_date_local = self.event_date.astimezone(local_timezone) if self.event_date else None
         formatted_booking_date = booking_date_local.strftime('%A, %B %d, %Y %I:%M %p') if booking_date_local else None
@@ -126,7 +136,7 @@ class Booking(db.Model, SerializerMixin):
         return {
             "id": self.id,
             "user_id": self.user_id,
-            "username": self.user.username,  # Add this line
+            "username": self.user.username,
             "booking_date": formatted_booking_date,
             "event_date": formatted_event_date,
             "event_name": self.event_name,
@@ -555,6 +565,8 @@ class User(db.Model, SerializerMixin):
         return bcrypt.check_password_hash(self.password_hash, plaintext_password)
 
     def to_dict(self):
+        local_timezone = pytz.timezone("America/New_York")  # You can use other timezones as needed
+
         formatted_created_at = self.created_at.strftime('%A, %B %d, %Y %I:%M %p') if self.created_at else None
         formatted_last_login = self.last_login.strftime('%A, %B %d, %Y %I:%M %p') if self.last_login else None
         return {
@@ -635,7 +647,7 @@ def signin():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-
+    print('\n\n\n\n USERN NAME IS', username)
     if not username or not password:
         return jsonify({'error': 'Username and password are required.'}), 400
 
@@ -934,7 +946,6 @@ class EngineeringBooking(db.Model, SerializerMixin):
     booking_date = db.Column(db.DateTime, default=db.func.now(), nullable=False)
     project_name = db.Column(db.String(100), nullable=True)  # New field
     service_type = db.Column(db.String(50), nullable=False, default="New Website")  # New field
-
     project_start_date = db.Column(db.DateTime, nullable=False)  # Date when the project starts
     project_end_date = db.Column(db.DateTime, nullable=False)  # Date when the project is expected to end
     project_description = db.Column(db.Text, nullable=False)  # Detailed description of the project
@@ -942,6 +953,9 @@ class EngineeringBooking(db.Model, SerializerMixin):
     price = db.Column(db.Float, nullable=False)  # Price for the engineering project
     payment_status = db.Column(db.String(20), nullable=False, default="unpaid")  # e.g., unpaid, paid
     special_requests = db.Column(db.Text, nullable=True)  # Any additional requests for the booking
+    project_manager = db.Column(db.String(100), nullable=True)  # Name of the project manager
+    contact_email = db.Column(db.String(100), nullable=True)    # Email of the contact person
+    contact_phone = db.Column(db.String(20), nullable=True)     # Phone number of the contact person
 
     # Relationship with User
     user = db.relationship("User", back_populates="engineering_bookings")
@@ -965,6 +979,9 @@ class EngineeringBooking(db.Model, SerializerMixin):
             "price": self.price,
             "payment_status": self.payment_status,
             "special_requests": self.special_requests,
+            "project_manager": self.project_manager,       # New field
+            "contact_email": self.contact_email,           # New field
+            "contact_phone": self.contact_phone            # New field
     }
     
     @app.post('/api/engineeringbookings')
@@ -990,6 +1007,9 @@ class EngineeringBooking(db.Model, SerializerMixin):
         project_description = data.get('project_description')
         price = data.get('price')
         special_requests = data.get('special_requests')
+        project_manager = data.get('project_manager')
+        contact_email = data.get('contact_email')
+        contact_phone = data.get('contact_phone')
 
         # Validation: Required fields
         if not all([project_start_date, project_end_date, project_description, price]):
@@ -1023,6 +1043,9 @@ class EngineeringBooking(db.Model, SerializerMixin):
             project_description=project_description,
             price=price,
             special_requests=special_requests,
+            project_manager=project_manager,
+            contact_email=contact_email,
+            contact_phone=contact_phone,
         )
 
         db.session.add(new_engineering_booking)
@@ -1065,13 +1088,27 @@ class EngineeringBooking(db.Model, SerializerMixin):
             engineering_booking.price = price
         if 'special_requests' in data:
             engineering_booking.special_requests = data['special_requests']
-            # Update new columns: project_name and service_type
         if 'project_name' in data:
             engineering_booking.project_name = data['project_name']
         if 'service_type' in data:
             if data['service_type'] not in ['New Website', 'Consultation']:
                 return jsonify({'error': 'Invalid service type. Choose "New Website" or "Consultation".'}), 400
             engineering_booking.service_type = data['service_type']
+            # Update new fields: project_manager, contact_email, and contact_phone
+        if 'project_manager' in data:
+            engineering_booking.project_manager = data['project_manager']
+
+        if 'contact_email' in data:
+            contact_email = data['contact_email']
+            if '@' not in contact_email:
+                return jsonify({'error': 'Invalid contact email format.'}), 400
+            engineering_booking.contact_email = contact_email
+
+        if 'contact_phone' in data:
+            contact_phone = data['contact_phone']
+            if not contact_phone.isdigit():
+                return jsonify({'error': 'Contact phone must contain only digits.'}), 400
+            engineering_booking.contact_phone = contact_phone
 
         db.session.commit()
         print("Engineering Booking After Update:", engineering_booking.to_dict())
