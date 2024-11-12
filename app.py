@@ -150,6 +150,8 @@ class Booking(db.Model, SerializerMixin):
             "client_name": self.client_name,
             "client_email": self.client_email,
             "client_phone": self.client_phone,
+            "rating": self.rating,
+
         }
 
 @app.post('/api/bookings')
@@ -253,6 +255,9 @@ def rate_booking(booking_id):
     data = request.get_json()
     rating = data.get('rating')
 
+    # Debug: Print the received rating value
+    print("Received rating:", rating)
+
     # Validate rating
     if not isinstance(rating, int) or rating < 1 or rating > 5:
         return jsonify({'error': 'Rating must be an integer between 1 and 5.'}), 400
@@ -261,7 +266,12 @@ def rate_booking(booking_id):
     booking.rating = rating
     db.session.commit()
 
-    return jsonify({'message': 'Rating submitted successfully.', 'rating': rating}), 200
+    # Debug: Print booking data after updating the rating
+    print("Booking Data After Rating Update:", booking.to_dict())
+
+    # Return the updated booking data
+    return jsonify(booking.to_dict()), 200
+
 
 @app.get('/api/average-rating')
 def get_average_rating():
@@ -455,6 +465,11 @@ def update_booking(booking_id):
     booking.special_requests = data.get('special_requests', booking.special_requests)
     booking.payment_status = data.get('payment_status', booking.payment_status)
 
+    if 'rating' in data:
+        rating = data.get('rating')
+        if not isinstance(rating, int) or rating < 1 or rating > 5:
+            return jsonify({'error': 'Rating must be an integer between 1 and 5.'}), 400
+        booking.rating = rating
     # Validate email format
     email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
     if booking.client_email and not re.match(email_regex, booking.client_email):
