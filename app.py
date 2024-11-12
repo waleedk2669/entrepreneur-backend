@@ -971,6 +971,7 @@ class EngineeringBooking(db.Model, SerializerMixin):
     project_manager = db.Column(db.String(100), nullable=True)  # Name of the project manager
     contact_email = db.Column(db.String(100), nullable=True)    # Email of the contact person
     contact_phone = db.Column(db.String(20), nullable=True)     # Phone number of the contact person
+    rating = db.Column(db.Integer, nullable=True)  # New field for rating
 
     # Relationship with User
     user = db.relationship("User", back_populates="engineering_bookings")
@@ -996,7 +997,9 @@ class EngineeringBooking(db.Model, SerializerMixin):
             "special_requests": self.special_requests,
             "project_manager": self.project_manager,       # New field
             "contact_email": self.contact_email,           # New field
-            "contact_phone": self.contact_phone            # New field
+            "contact_phone": self.contact_phone,            # New field
+            "rating": self.rating  # Include rating
+
     }
     
     @app.post('/api/engineeringbookings')
@@ -1124,6 +1127,12 @@ class EngineeringBooking(db.Model, SerializerMixin):
             if not contact_phone.isdigit():
                 return jsonify({'error': 'Contact phone must contain only digits.'}), 400
             engineering_booking.contact_phone = contact_phone
+
+        if 'rating' in data:
+            rating = data.get('rating')
+            if not isinstance(rating, int) or rating < 1 or rating > 5:
+                return jsonify({'error': 'Rating must be an integer between 1 and 5.'}), 400
+            engineering_booking.rating = rating
 
         db.session.commit()
         print("Engineering Booking After Update:", engineering_booking.to_dict())
