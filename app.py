@@ -12,6 +12,8 @@ import re
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import jwt
+from sqlalchemy import extract,func, cast, Date
+
 from functools import wraps
 
 
@@ -78,6 +80,11 @@ def before_request():
     if request.method == 'OPTIONS':
         return '', 204
 
+    # Skip token verification for the signup route
+    if request.endpoint == 'signup':
+        return
+
+    # Token verification for other routes
     token = request.headers.get('Authorization', '').split(" ")[1] if 'Authorization' in request.headers else None
     if token:
         try:
@@ -93,6 +100,7 @@ def before_request():
             return jsonify({'error': 'Invalid token'}), 401
     else:
         return jsonify({'error': 'Token is missing'}), 401
+
 
 @app.after_request
 def after_request(response):
@@ -651,11 +659,13 @@ def signup():
 
     db.session.add(new_user)
     db.session.commit()
-    token = generate_token(new_user)
 
-    # Generate JWT token
-    print(f"User '{username}' signed up and is automatically signed in.")
-    return jsonify({'message': 'Signup successful! You are now logged in.', 'token': token, 'user': new_user.to_dict()}), 201
+    # Just return a success message, without signing the user in automatically
+    return jsonify({
+        'message': 'Signup successful! You can now log in manually.',
+        'user': new_user.to_dict()
+    }), 201
+
 
 @app.post('/api/signin')
 def signin():
@@ -713,11 +723,111 @@ def admin_dashboard():
     total_regular_bookings = Booking.query.count()
     total_engineering_bookings = EngineeringBooking.query.count()
     total_bookings = total_regular_bookings + total_engineering_bookings
+# Fetch daily new registrations for the past 30 days
+    daily_registrations = (
+        db.session.query(
+            func.date(User.created_at).label("date"),
+            func.count(User.id).label("count")
+        )
+        .filter(User.created_at >= datetime.now() - timedelta(days=30))
+        .group_by(func.date(User.created_at))
+        .order_by(func.date(User.created_at))
+        .all()
+    )
+
+    # Format the daily registrations data for consistent date handling
+    daily_registrations_data = [
+        {
+            "date": datetime.strptime(date, '%Y-%m-%d').strftime('%A, %B %d, %Y'),
+            "count": count
+        }
+        for date, count in daily_registrations
+    ]
+
+    # Add Upcoming Bookings Metric
+    # Fetch upcoming regular bookings
+    upcoming_regular_bookings = (
+        Booking.query.filter(Booking.event_date >= datetime.now())
+        .order_by(Booking.event_date.asc())
+        .limit(10)
+        .all()
+    )
+    upcoming_regular_bookings_data = [booking.to_dict() for booking in upcoming_regular_bookings]
+
+    # Fetch upcoming engineering bookings
+    upcoming_engineering_bookings = (
+        EngineeringBooking.query.filter(EngineeringBooking.project_start_date >= datetime.now())
+        .order_by(EngineeringBooking.project_start_date.asc())
+        .limit(10)
+        .all()
+    )
+    upcoming_engineering_bookings_data = [eng_booking.to_dict() for eng_booking in upcoming_engineering_bookings]
+
+    # Combine the upcoming bookings data
+    upcoming_bookings_data = upcoming_regular_bookings_data + upcoming_engineering_bookings_data
 
     # Revenue summary
     total_revenue_regular = db.session.query(db.func.sum(Booking.price)).scalar() or 0
     total_revenue_engineering = db.session.query(db.func.sum(EngineeringBooking.price)).scalar() or 0
     total_revenue = total_revenue_regular + total_revenue_engineering
+
+
+    daily_average_guests = (
+        db.session.query(
+            func.date(Booking.event_date).label("date"),  # Extract date as a string
+            func.avg(Booking.number_of_guests).label("average_guests")
+        )
+        .filter(Booking.event_date >= datetime.now() - timedelta(days=30))
+        .group_by(func.date(Booking.event_date))
+        .order_by(func.date(Booking.event_date))
+        .all()
+    )
+
+    # Format the data with consistent date handling
+    daily_average_guests_data = [
+        {
+            "date": datetime.strptime(date, '%Y-%m-%d').strftime('%A, %B %d, %Y'),  # Convert to desired format
+            "average_guests": round(average_guests, 2)
+        }
+        for date, average_guests in daily_average_guests
+    ]
+
+    avg_guests = db.session.query(db.func.avg(Booking.number_of_guests)).scalar() or 0
+    avg_guests = round(avg_guests, 2)
+
+
+    # Include in the response
+    response_data = {
+        "overview": {
+            "total_bookings": total_bookings,
+            "total_revenue": total_revenue,
+            "average_guests": avg_guests,
+        },
+        "daily_average_guests": daily_average_guests_data,  # Include this in the response
+    }
+
+    # Revenue by client type
+    regular_client_revenue = total_revenue_regular
+    engineering_client_revenue = total_revenue_engineering
+
+    revenue_by_client_type = {
+        "regular_clients": round(regular_client_revenue, 2),
+        "engineering_clients": round(engineering_client_revenue, 2)
+    }
+
+
+
+        # Last Login Times (top 10 users by recent login)
+    last_login_times = (
+        User.query.filter(User.last_login.isnot(None))
+        .order_by(User.last_login.desc())
+        .limit(10)
+        .all()
+    )
+    last_login_times_data = [
+        {"username": user.username, "last_login": user.last_login.strftime('%A, %B %d, %Y %I:%M %p') if user.last_login else "N/A"}
+        for user in last_login_times
+    ]
 
     # Booking status summary
     status_summary = {
@@ -737,12 +847,85 @@ def admin_dashboard():
     total_users = User.query.count()
     active_clients = User.query.filter(User.last_login >= datetime.now() - timedelta(days=30)).count()
 
+    # Calculate new registrations in the last 30 days
+    new_registrations = User.query.filter(User.created_at >= datetime.now() - timedelta(days=30)).count()
+    # Calculate average ratings
+    avg_rating_regular = db.session.query(db.func.avg(Booking.rating)).scalar() or 0
+    avg_rating_engineering = db.session.query(db.func.avg(EngineeringBooking.rating)).scalar() or 0
+    overall_avg_rating = round((avg_rating_regular + avg_rating_engineering) / 2, 2) if (avg_rating_regular and avg_rating_engineering) else max(avg_rating_regular, avg_rating_engineering)
+
+    top_location = db.session.query(Booking.location).group_by(Booking.location).order_by(db.func.count(Booking.location).desc()).first()
+    top_location = top_location[0] if top_location else "N/A"
+    
+    # Calculate monthly revenue trends for the past 12 months
+    monthly_revenue = []
+    current_date = datetime.now()
+
+    for i in range(12):
+        month = (current_date.month - i - 1) % 12 + 1
+        year = current_date.year if current_date.month - i > 0 else current_date.year - 1
+
+        # Regular bookings revenue for the month
+        regular_revenue = (
+            db.session.query(db.func.sum(Booking.price))
+            .filter(extract('year', Booking.event_date) == year, extract('month', Booking.event_date) == month)
+            .scalar() or 0
+        )
+
+        # Engineering bookings revenue for the month
+        engineering_revenue = (
+            db.session.query(db.func.sum(EngineeringBooking.price))
+            .filter(extract('year', EngineeringBooking.project_start_date) == year, extract('month', EngineeringBooking.project_start_date) == month)
+            .scalar() or 0
+        )
+
+        # Total revenue for the month
+        total_monthly_revenue = regular_revenue + engineering_revenue
+
+        # Append the data to the list
+        monthly_revenue.append({
+            "month": f"{year}-{month:02}",
+            "revenue": round(total_monthly_revenue, 2)
+        })
+
     # Recent bookings (limit to 5)
     recent_bookings = Booking.query.order_by(Booking.event_date.desc()).limit(5).all()
     recent_engineering_bookings = EngineeringBooking.query.order_by(EngineeringBooking.project_start_date.desc()).limit(5).all()
 
     recent_bookings_data = [booking.to_dict() for booking in recent_bookings]
     recent_engineering_bookings_data = [eng_booking.to_dict() for eng_booking in recent_engineering_bookings]
+
+    # Unpaid bookings list (limit to 10)
+    unpaid_regular_bookings = Booking.query.filter_by(payment_status="unpaid").limit(10).all()
+    unpaid_engineering_bookings = EngineeringBooking.query.filter_by(payment_status="unpaid").limit(10).all()
+    unpaid_bookings_data = [booking.to_dict() for booking in unpaid_regular_bookings] + [eng_booking.to_dict() for eng_booking in unpaid_engineering_bookings]
+
+    # Most active clients (top 5 by number of bookings)
+    most_active_clients = (
+        db.session.query(User.username, db.func.count(Booking.id).label('total_bookings'))
+        .join(Booking, User.id == Booking.user_id)
+        .filter(User.user_type == 'client')
+        .group_by(User.username)
+        .order_by(db.func.count(Booking.id).desc())
+        .limit(5)
+        .all()
+    )
+
+    most_active_clients_data = [{"username": client[0], "total_bookings": client[1]} for client in most_active_clients]
+
+
+
+    # Top services requested (top 3 service types)
+    top_services = (
+        db.session.query(EngineeringBooking.service_type, db.func.count(EngineeringBooking.id).label('request_count'))
+        .group_by(EngineeringBooking.service_type)
+        .order_by(db.func.count(EngineeringBooking.id).desc())
+        .limit(3)
+        .all()
+    )
+
+    top_services_data = [{"service_type": service[0], "request_count": service[1]} for service in top_services]
+
 
     # Response data
     response_data = {
@@ -752,11 +935,32 @@ def admin_dashboard():
             "total_revenue": total_revenue,
             "total_users": total_users,
             "active_clients": active_clients,
+            "new_registrations": new_registrations,
             "status_summary": status_summary,
             "payment_summary": payment_summary,
+            "average_rating": overall_avg_rating,
+            "top_location": top_location,
+            "average_guests": avg_guests,
         },
+        "monthly_revenue_trends": monthly_revenue,
+        "daily_average_guests": daily_average_guests_data,  # Include this line
+        "daily_registrations": daily_registrations_data,
+
+
         "recent_bookings": recent_bookings_data,
         "recent_engineering_bookings": recent_engineering_bookings_data,
+        "unpaid_bookings": unpaid_bookings_data,
+        "most_active_clients": most_active_clients_data,
+        "top_services_requested": top_services_data,
+        "revenue_by_client_type": revenue_by_client_type,
+        "upcoming_bookings": upcoming_bookings_data,
+        "last_login_times": last_login_times_data,
+
+
+
+
+
+
     }
 
     return jsonify(response_data), 200
@@ -1000,7 +1204,7 @@ class EngineeringBooking(db.Model, SerializerMixin):
             "contact_phone": self.contact_phone,            # New field
             "rating": self.rating  # Include rating
 
-    }
+        }
     
     @app.post('/api/engineeringbookings')
     @token_required
@@ -1247,6 +1451,48 @@ def check_session():
         return jsonify({'error': 'User not found.'}), 404
 
     return jsonify({'user': user.to_dict()}), 200
+
+@app.get('/api/all-regular-bookings')
+@token_required
+def get_all_regular_bookings():
+    user_id = request.user_id
+    user_type = request.user_type
+
+    print("Token Data:", {"user_id": user_id, "user_type": user_type})
+
+    # Only admins can access this endpoint
+    if user_type != 'admin':
+        return jsonify({'error': 'Unauthorized access. Admins only.'}), 403
+
+    # Fetch all regular bookings
+    regular_bookings = Booking.query.order_by(Booking.event_date.desc()).all()
+    regular_bookings_data = [booking.to_dict() for booking in regular_bookings]
+
+    print(f"Total regular bookings fetched: {len(regular_bookings_data)}")
+
+    return jsonify({'all_regular_bookings': regular_bookings_data}), 200
+
+@app.get('/api/all-engineering-bookings')
+@token_required
+def get_all_engineering_bookings():
+    user_id = request.user_id
+    user_type = request.user_type
+
+    print("Token Data:", {"user_id": user_id, "user_type": user_type})
+
+    # Only admins can access this endpoint
+    if user_type != 'admin':
+        return jsonify({'error': 'Unauthorized access. Admins only.'}), 403
+
+    # Fetch all engineering bookings
+    engineering_bookings = EngineeringBooking.query.order_by(EngineeringBooking.project_start_date.desc()).all()
+    engineering_bookings_data = [booking.to_dict() for booking in engineering_bookings]
+
+    print(f"Total engineering bookings fetched: {len(engineering_bookings_data)}")
+
+    return jsonify({'all_engineering_bookings': engineering_bookings_data}), 200
+
+
 
 if __name__ == "__main__":
     app.run(debug=True)
