@@ -718,7 +718,24 @@ def admin_dashboard():
         return jsonify({'error': 'Unauthorized access'}), 403
 
     print("Admin check passed. User is an admin.")
+    daily_active_clients = (
+        db.session.query(
+            func.date(User.last_login).label("date"),
+            func.count(User.id).label("count")
+        )
+        .filter(User.last_login >= datetime.now() - timedelta(days=30))
+        .group_by(func.date(User.last_login))
+        .order_by(func.date(User.last_login))
+        .all()
+    )
 
+    daily_active_clients_data = [
+        {
+            "date": datetime.strptime(date, '%Y-%m-%d').strftime('%A, %B %d, %Y'),
+            "count": count
+        }
+        for date, count in daily_active_clients
+    ]
     # Aggregate booking statistics
     total_regular_bookings = Booking.query.count()
     total_engineering_bookings = EngineeringBooking.query.count()
@@ -857,14 +874,17 @@ def admin_dashboard():
     top_location = db.session.query(Booking.location).group_by(Booking.location).order_by(db.func.count(Booking.location).desc()).first()
     top_location = top_location[0] if top_location else "N/A"
     
-    # Calculate monthly revenue trends for the past 12 months
     monthly_revenue = []
     current_date = datetime.now()
 
-    for i in range(12):
-        month = (current_date.month - i - 1) % 12 + 1
-        year = current_date.year if current_date.month - i > 0 else current_date.year - 1
+    # Create a list of the past 12 months in (year, month) format
+    months_list = [(current_date.year if current_date.month - i > 0 else current_date.year - 1,
+                    (current_date.month - i - 1) % 12 + 1)
+                for i in range(12)]
+    months_list.reverse()  # Ensure the list is in chronological order
 
+    # Iterate through the months list and calculate revenue
+    for year, month in months_list:
         # Regular bookings revenue for the month
         regular_revenue = (
             db.session.query(db.func.sum(Booking.price))
@@ -882,12 +902,14 @@ def admin_dashboard():
         # Total revenue for the month
         total_monthly_revenue = regular_revenue + engineering_revenue
 
-        # Append the data to the list
+        # Append the data to the list with zero-filling if necessary
         monthly_revenue.append({
             "month": f"{year}-{month:02}",
             "revenue": round(total_monthly_revenue, 2)
         })
 
+    # Print the monthly revenue for debugging
+    print("Monthly Revenue Trends Data:", monthly_revenue)
     # Recent bookings (limit to 5)
     recent_bookings = Booking.query.order_by(Booking.event_date.desc()).limit(5).all()
     recent_engineering_bookings = EngineeringBooking.query.order_by(EngineeringBooking.project_start_date.desc()).limit(5).all()
@@ -945,8 +967,7 @@ def admin_dashboard():
         "monthly_revenue_trends": monthly_revenue,
         "daily_average_guests": daily_average_guests_data,  # Include this line
         "daily_registrations": daily_registrations_data,
-
-
+        "daily_active_clients": daily_active_clients_data,
         "recent_bookings": recent_bookings_data,
         "recent_engineering_bookings": recent_engineering_bookings_data,
         "unpaid_bookings": unpaid_bookings_data,
