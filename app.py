@@ -81,7 +81,7 @@ def before_request():
         return '', 204
 
     # Skip token verification for the signup route
-    if request.endpoint == 'signup':
+    if request.endpoint in ['signup', 'send_message', 'get_average_rating']:
         return
 
     # Token verification for other routes
@@ -283,12 +283,13 @@ def rate_booking(booking_id):
 
 @app.get('/api/average-rating')
 def get_average_rating():
-    user_id = request.user_id  # Extracted from JWT token payload
-    user_type = request.user_type  # Extracted from JWT token payload (if needed)
+    try:
+        average_rating = db.session.query(db.func.avg(Booking.rating)).scalar() or 0
+        return jsonify({'average_rating': round(average_rating, 2)}), 200
+    except Exception as e:
+        print("Error fetching average rating:", str(e))
+        return jsonify({'error': 'Failed to fetch average rating.'}), 500
 
-    print("Token Data:", {"user_id": user_id, "user_type": user_type})
-    average_rating = db.session.query(db.func.avg(Booking.rating)).scalar() or 0
-    return jsonify({'average_rating': round(average_rating, 2)}), 200
 
 @app.get('/api/bookings')
 def get_all_bookings():
@@ -1512,6 +1513,87 @@ def get_all_engineering_bookings():
     print(f"Total engineering bookings fetched: {len(engineering_bookings_data)}")
 
     return jsonify({'all_engineering_bookings': engineering_bookings_data}), 200
+
+
+#------------------------------------------------------------------------------------Mesages-----------------------------------------------#
+
+
+class Message(db.Model, SerializerMixin):
+    __tablename__ = "messages"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "email": self.email,
+            "content": self.content,
+            "created_at": self.created_at.strftime('%A, %B %d, %Y %I:%M %p'),
+        }
+
+@app.post('/api/messages')
+def send_message():
+    data = request.get_json()
+    name = data.get('name')
+    email = data.get('email')
+    content = data.get('content')
+
+    # Validate input fields
+    if not all([name, email, content]):
+        return jsonify({'error': 'Name, email, and message content are required.'}), 400
+
+    # Validate email format
+    email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    if not re.match(email_regex, email):
+        return jsonify({'error': 'Invalid email format.'}), 400
+
+    # Create a new message
+    new_message = Message(name=name, email=email, content=content)
+    db.session.add(new_message)
+    db.session.commit()
+
+    return jsonify({'message': 'Message sent successfully!'}), 201
+
+@app.get('/api/admin/messages')
+@token_required
+def get_all_messages():
+    user_type = request.user_type
+
+    # Only admins can view all messages
+    if user_type != 'admin':
+        return jsonify({'error': 'Unauthorized access. Admins only.'}), 403
+
+    messages = Message.query.order_by(Message.created_at.desc()).all()
+    messages_data = [message.to_dict() for message in messages]
+
+    return jsonify({'messages': messages_data}), 200
+
+
+@app.delete('/api/admin/messages/<int:message_id>')
+@token_required
+def delete_message(message_id):
+    user_type = request.user_type
+
+    # Only admins can delete messages
+    if user_type != 'admin':
+        return jsonify({'error': 'Unauthorized access. Admins only.'}), 403
+
+    # Retrieve the message by its ID
+    message = Message.query.get(message_id)
+    if not message:
+        return jsonify({'error': 'Message not found.'}), 404
+
+    # Delete the message from the database
+    db.session.delete(message)
+    db.session.commit()
+
+    return jsonify({'message': 'Message deleted successfully.'}), 200
+
 
 
 
