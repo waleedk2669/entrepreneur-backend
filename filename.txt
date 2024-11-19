@@ -1,0 +1,11 @@
+flask-migrate
+flask-sqlalchemy
+sqlalchemy-serializer
+flask
+flask-bcrypt
+flask-session
+pytz
+flask-limiter
+flask-cors
+flask-caching
+pyjwt

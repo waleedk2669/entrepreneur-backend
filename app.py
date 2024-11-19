@@ -17,6 +17,12 @@ from sqlalchemy import extract,func, cast, Date
 from functools import wraps
 
 
+# code for stripe
+import stripe
+stripe.api_key = 'sk_test_51OHVuDErhU2BBi1rAjtH4VomzozGPusHCQX5UVCaKKOGYpvn072F1E5jtjZmbFUthVBQZ1wXzKmB4ovZfvS1Do0U00D9BjO0Wi'
+YOUR_DOMAIN = 'http://localhost:5173/client-dashboard'
+
+
 app = Flask(__name__)
 # CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}}, supports_credentials=True)
 CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_headers=["Content-Type", "Authorization"],)
@@ -161,6 +167,67 @@ class Booking(db.Model, SerializerMixin):
             "rating": self.rating,
 
         }
+
+
+# code for stripe create checkout session
+
+# @app.route('/create-checkout-session', methods=['POST'])
+# @token_required
+# def create_checkout_session():
+#     try:
+#         checkout_session = stripe.checkout.Session.create(
+#             line_items=[
+#                 {
+#                     # Provide the exact Price ID (for example, pr_1234) of the product you want to sell
+#                     'price': '{{PRICE_ID}}',
+#                     'quantity': 1,
+#                 },
+#             ],
+#             mode='payment',
+#             success_url=YOUR_DOMAIN + '?success=true',
+#             cancel_url=YOUR_DOMAIN + '?canceled=true',
+#         )
+#     except Exception as e:
+#         return str(e)
+
+#     return redirect(checkout_session.url, code=303)
+
+@app.route('/create-checkout-session', methods=['POST'])
+@token_required
+def create_checkout_session():
+    try:
+        data = request.json  # Extract booking details from the request
+        booking_id = data.get('booking_id')
+        booking_price = data.get('price')  # Ensure this comes from the database for security
+        type = data.get('type')
+
+        if not booking_id or not booking_price:
+            return jsonify({"error": "Invalid booking details"}), 400
+
+        # Create a Stripe Checkout Session
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[
+                {
+                    'price_data': {
+                        'currency': 'usd',
+                        'product_data': {
+                            'name': f"Booking ID: {booking_id}"
+                        },
+                        'unit_amount': int(booking_price * 100),  # Amount in cents
+                    },
+                    'quantity': 1,
+                },
+            ],
+            mode='payment',
+            success_url=YOUR_DOMAIN + f"?success=true&booking_id={booking_id}&type={type}",
+            cancel_url=YOUR_DOMAIN + '?canceled=true',
+        )
+
+        return jsonify({"url": session.url})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.post('/api/bookings')
 @token_required
@@ -473,6 +540,13 @@ def update_booking(booking_id):
     booking.price = round(float(data.get('price')), 2) if data.get('price') else booking.price
     booking.special_requests = data.get('special_requests', booking.special_requests)
     booking.payment_status = data.get('payment_status', booking.payment_status)
+
+    # New: Update payment_status
+    if 'payment_status' in data:
+        payment_status = data['payment_status']
+        if payment_status not in ['pending', 'paid']:
+            return jsonify({'error': 'Invalid payment status. Choose "pending" or "paid".'}), 400
+        booking.payment_status = payment_status
 
     if 'rating' in data:
         rating = data.get('rating')
@@ -1359,6 +1433,14 @@ class EngineeringBooking(db.Model, SerializerMixin):
             if not isinstance(rating, int) or rating < 1 or rating > 5:
                 return jsonify({'error': 'Rating must be an integer between 1 and 5.'}), 400
             engineering_booking.rating = rating
+        
+        # New: Update payment_status
+        if 'payment_status' in data:
+            payment_status = data['payment_status']
+            if payment_status not in ['unpaid', 'paid']:
+                return jsonify({'error': 'Invalid payment status. Choose "unpaid" or "paid".'}), 400
+            engineering_booking.payment_status = payment_status
+
 
         db.session.commit()
         print("Engineering Booking After Update:", engineering_booking.to_dict())
