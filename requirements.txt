@@ -1,7 +1,8 @@
+flask
+gunicorn
 flask-migrate
 flask-sqlalchemy
 sqlalchemy-serializer
-flask
 flask-bcrypt
 flask-session
 pytz

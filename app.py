@@ -16,16 +16,17 @@ from sqlalchemy import extract,func, cast, Date
 
 from functools import wraps
 
+baseUrl='https://entrepreneur-frontend.netlify.app/'
 
 # code for stripe
 import stripe
 stripe.api_key = 'sk_test_51OHVuDErhU2BBi1rAjtH4VomzozGPusHCQX5UVCaKKOGYpvn072F1E5jtjZmbFUthVBQZ1wXzKmB4ovZfvS1Do0U00D9BjO0Wi'
-YOUR_DOMAIN = 'http://localhost:5173/client-dashboard'
+YOUR_DOMAIN = 'https://entrepreneur-frontend.netlify.app/client-dashboard'
 
 
 app = Flask(__name__)
 # CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}}, supports_credentials=True)
-CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_headers=["Content-Type", "Authorization"],)
+CORS(app, supports_credentials=True, origins=["https://entrepreneur-frontend.netlify.app/","http://localhost:5173", "http://127.0.0.1:5173"], allow_headers=["Content-Type", "Authorization"],)
 
 app.secret_key = "supersecretkey" 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///jwhit.db"
@@ -1679,5 +1680,5 @@ def delete_message(message_id):
 
 
 
-if __name__ == "__main__":
-    app.run(debug=True)
+# if __name__ == "__main__":
+#     app.run(debug=True)
