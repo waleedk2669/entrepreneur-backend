@@ -10,3 +10,4 @@ flask-limiter
 flask-cors
 flask-caching
 pyjwt
+stripe
